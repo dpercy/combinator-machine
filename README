@@ -1,0 +1,42 @@
+
+Turner 1979 "A New Implementation Technique for Applicative Languages"
+https://pdfs.semanticscholar.org/e32e/062c1288c05bbb1ab02526fda5e1d4f77681.pdf
+
+Purity of Haskell - simplicity of Lisp!
+
+
+Super simple!
+Program is a tree where nodes are (App _ _) and leaves are S, K, plus, ...
+Source lang is untyped, has destructuring bind.
+
+You get awesome stuff for free!
+- runtime doesn't care about scope
+- graph reduction -> self optimizing
+
+Problems:
+- graph updates lead to cycles; cycles lead to GC
+  - can you get the self-optimizing behavior with acyclic terms?
+    - maybe you can turn cycles back into Y somehow?
+- can other tree representations avoid pointers?
+- call-by-need is confusing because
+    - data can be bottom
+    - data can be cyclic or infinitely large
+    - hard to reason about resource usage
+  - maybe use call-by-value instead
+    - but then cond isn't free
+    - maybe this gives you eager optimization?
+BUT OTOH:
+- call-by-need is neat because
+  - cond is free
+  - (NO) inspecting not-yet-evaluated terms could make sense
+    - usually inspecting a value forces it
+    - what you actually want is to inspect *function-values* which are *data*,
+      not redexes.
+- maybe nontermination could be fixed with a termination checker
+  - but see Noether argument for why failure can't be eliminated
+
+TODO:
+- write ski.rkt, with a reify macro that creates Turner combinators
+- test examples of higher-order functions like foldr and thrice:
+    - do they simplify to the hand-written version?
+    - can evaluation be *too* eager? (diverge at compile time)
