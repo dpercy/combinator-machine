@@ -8,14 +8,14 @@
 (define keyword? (or/c 'lambda))
 (define var? (and/c symbol? (not/c prim?) (not/c keyword?)))
 
-(define expr?
+(define expr? ; open terms + lambda
   (flat-rec-contract expr?
                      (or/c prim?
                            number?
                            (list/c expr? expr?)
                            var?
                            (list/c 'lambda (list/c var?) expr?))))
-(define combination?
+(define combination? ; open terms
   (flat-rec-contract term?
                      (or/c prim?
                            number?
@@ -85,6 +85,9 @@
     [{x (list e1 e2)} (S (abs x e1) (abs x e2))]
     [{x x} 'I]
     [{x y} `(K ,y)]))
+; smart constructor for S:
+; if one or both arguments are constant, we can avoid plumbing an ignored
+; value everywhere.
 (define/contract (S e1 e2) (-> combination? combination? combination?)
   (match* {e1 e2}
     [{`(K ,e1) `(K ,e2)} `(K (,e1 ,e2))]
@@ -101,12 +104,34 @@
 
   (check-equal? (compile '(lambda (x) ((+ 40) x))) '(+ 40))
 
+
+  ; S threads a free variable through a function application
+  (check-equal? (compile '(lambda (x) ((cons x) (+ x))))
+                '((S cons) +))
+  (check-match ((eval '((S cons) +)) 100)
+               (cons 100 (? procedure? f))
+               (equal? (f 3) 103))
+
+  ; K is the constant operator
+  (check-equal? (compile '(lambda (x) 42)) '(K 42))
+  (check-equal? ((eval '(K 42)) 1337) 42)
+
   ; C is like a right operator section: (C + 40) == (_ + 40)
   (check-equal? (compile '(lambda (x) ((+ x) 40))) '((C +) 40))
+  (check-equal? ((eval '((C +) 40)) 2) 42)
+  (check-equal? ((eval '((C cons) 40)) 2) (cons 2 40))
 
   ; B is the compose operator: B f g x == f (g x)
   (check-equal? (compile '(lambda (x) ((+ 2) ((+ 10) x))))
-                `((B (+ 2)) (+ 10)))
+                '((B (+ 2)) (+ 10)))
+  (check-equal? ((eval '((B (+ 2)) (+ 10))) 3) 15)
+  (check-equal? ((eval '((B (cons 2)) (cons 10))) 3) (list* 2 10 3))
+
+
+  ; Can I repro the "self optimization" Turner mentioned?
+
+
+
 
   ;;
   )
