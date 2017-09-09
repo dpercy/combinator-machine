@@ -225,29 +225,99 @@ maybe there's just a type for "strict lambda"
 ; reduces it in place to a value (or (App 'I value)).
 ; also returns the value (without the I wrapper).
 (define (run! graph)
-  (r! (list graph)))
-(define (r! stack)
-  (define (ret) (foldl (lambda (a f) (App f a)) (first stack) (rest stack)))
-  (match stack
-    [(list* 'S f g x stack) (r! (list* f x (App g x) stack))]
-    [(list* 'K x y stack) (r! (list* x stack))]
-    [(list* 'I x stack) (r! (list* x stack))]
-    [(list* 'B f g x stack) (r! (list* f (App g x) stack))]
-    [(list* 'C f x y stack) (r! (list* f y x stack))]
-    [(list* '+ x y stack) (match* {(run! x) (run! y)}
-                            [{(? number? x) (? number? y)} (r! (list* (+ x y) stack))]
-                            [{x y} (error '+ "non-number: ~v ~v" x y)])]
-    [(list* 'inc stack) (r! (list* '+ 1 stack))]
-    [(list* (App f a) stack) (r! (list* f a stack))]
-    ; finally, if no rewrite rule applies,
-    ; the top of the stack must be either:
-    ; - a value
-    ; - a constructor
-    ; - something you're not allowed to apply, being applied
-    [(list (? number? n)) n]
-    [(list 'P x y) (ret)]
-    [(list* (and f (or 'S 'K 'I 'B 'C '+)) args) (ret)]
-    [_ (error 'r! "no rule for stack: ~v" stack)]))
+  ;;(displayln (list 'run! graph))
+  (define old-stack stack)
+  (set! stack (cons graph stack))
+  (r! 0)
+  (define result (first stack))
+  ;;(displayln (list 'got result))
+  (set! stack (rest stack))
+  (define new-stack stack)
+  (unless (equal? old-stack new-stack)
+    (error 'run! "stack mismatch: old: ~v; new ~v" old-stack new-stack))
+  result)
+(define stack (list))
+(define/contract (r! nargs) (-> exact-nonnegative-integer? void?)
+  (define (push! . vs)
+    (set! stack (append vs stack))
+    (set! nargs (+ nargs (length vs))))
+  (define (pop!)
+    (unless (>= nargs 0)
+      (error 'r! "stack underflow"))
+    (define v (first stack))
+    (set! stack (rest stack))
+    (set! nargs (- nargs 1))
+    v)
+
+  (define (ret)
+    (if (> nargs 0)
+        (let* ([f (pop!)]
+               [a (pop!)])
+          (push! (App f a))
+          (ret))
+        (void)))
+
+  ;;(displayln (list* 'r! nargs stack))
+  (match* {(first stack) nargs}
+    ; any application at all - recur into it
+    [{(App f a) _} (begin
+                     (pop!)
+                     (push! f a)
+                     (r! nargs))]
+
+    ; rewrite rules
+    [{'S (? (>=/c 3))} (let* ([ignore (pop!)]
+                              [f (pop!)]
+                              [g (pop!)]
+                              [x (pop!)])
+                         (push! f x (App g x))
+                         (r! nargs))]
+    [{'K (? (>=/c 2))} (let* ([ignore (pop!)]
+                              [x (pop!)]
+                              [y (pop!)])
+                         (push! x)
+                         (r! nargs))]
+    [{'I (? (>=/c 1))} (let* ([ignore (pop!)]
+                              [x (pop!)])
+                         (push! x)
+                         (r! nargs))]
+    [{'B (? (>=/c 3))} (let* ([ignore (pop!)]
+                              [f (pop!)]
+                              [g (pop!)]
+                              [x (pop!)])
+                         (push! f (App g x))
+                         (r! nargs))]
+    [{'C (? (>=/c 3))} (let* ([ignore (pop!)]
+                              [f (pop!)]
+                              [x (pop!)]
+                              [y (pop!)])
+                         (push! f y x)
+                         (r! nargs))]
+    [{'+ (? (>=/c 2))} (let ()
+                         (pop!) ; drop '+
+                         (r! 0) ; eval x
+                         (define x (match (pop!)
+                                     [(? number? n) n]
+                                     [v (error '+ "non-number: ~v" v)]))
+                         ; NOTE: x needs to be a GC root, or unboxed.
+                         (r! 0) ; eval y
+                         (define y (match (pop!)
+                                     [(? number? n) n]
+                                     [v (error '+ "non-number: ~v" v)]))
+                         (push! (+ x y))
+                         (r! nargs))]
+    [{'inc _} (begin
+                (pop!)
+                (push! '+ 1)
+                (r! nargs))]
+    ; not enough args -> it's a value
+    [{(or 'S 'K 'I 'B 'C '+) _} (ret)]
+
+    [{(? number?) 0} (ret)]
+    [{(? number? n) (? (>=/c 1))} (error 'run "not a function: ~v" n)]
+
+    [{'P (? (<=/c 2))} (ret)]
+    [{'P (? (>/c 2))} (error 'run "pair is not a function")]))
 (module+ test
 
 
