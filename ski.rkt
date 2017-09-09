@@ -207,7 +207,14 @@ maybe there's just a type for "strict lambda"
 
 
 
-(struct App (f a) #:transparent #:mutable)
+(struct App (f a) #:transparent #:mutable
+  #:methods gen:custom-write
+  [(define (write-proc v port mode)
+     (write-string "(" port)
+     (write (App-f v) port)
+     (write-string " " port)
+     (write (App-a v) port)
+     (write-string ")" port))])
 
 (define/contract (term->graph term) (-> term? any/c)
   ; TODO memoize for some free sharing
@@ -237,6 +244,8 @@ maybe there's just a type for "strict lambda"
     (error 'run! "stack mismatch: old: ~v; new ~v" old-stack new-stack))
   result)
 (define stack (list))
+(define (clear!) (set! stack '()))
+(define nsteps (make-parameter 0))
 (define/contract (r! nargs) (-> exact-nonnegative-integer? void?)
   (define (push! . vs)
     (set! stack (append vs stack))
@@ -256,6 +265,8 @@ maybe there's just a type for "strict lambda"
           (push! (App f a))
           (ret))
         (void)))
+
+  (nsteps (+ 1 (nsteps)))
 
   ;;(displayln (list* 'r! nargs stack))
   (match* {(first stack) nargs}
@@ -368,6 +379,28 @@ maybe there's just a type for "strict lambda"
   (check-equal? (run! (App (App (App 'C 'P) (App 'I 'K)) (App 'I (App 'I (App 'I 'K)))))
                 (App (App 'P (App 'I (App 'I (App 'I 'K))))
                      (App 'I 'K)))
+
+
+  (define (count term)
+    (parameterize ([nsteps 0])
+      (run! (term->graph term))
+      (nsteps)))
+
+  (define I '(((((((I I) I) I) I) I) I) I))
+  (check-equal? (count I)
+                15)
+
+  ; TODO case where a subterm gets duplicated, then forced twice.
+  ;  it should memoize the forcing.
+
+  (define twice '((S B) I))
+  (check-equal? (count `((,twice I) 0))
+                12)
+
+  ; if I is evaluated once,  this should cost about 12 + 15
+  ; if I is evaluated twice, this should cost about 12 + 15 + 15
+  (check-equal? (count `((,twice ,I) 0))
+                27)
 
   ;;
   )
