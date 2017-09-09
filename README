@@ -34,6 +34,10 @@ BUT OTOH:
       not redexes.
 - maybe nontermination could be fixed with a termination checker
   - but see Noether argument for why failure can't be eliminated
+BUT OTOH:
+- call-by-need and call-by-value seem to *both* break equational reasoning if you have effects:
+  https://www.cs.bham.ac.uk/~pbl/papers/cbpvefftt.pdf
+    - and isn't nontermination an effect, like that slideshow's "error" effect?
 
 TODO:
 - write ski.rkt, with a reify macro that creates Turner combinators

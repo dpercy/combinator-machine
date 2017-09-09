@@ -3,6 +3,33 @@
 (require (prefix-in racket: racket))
 (module+ test (require rackunit))
 
+#|
+
+S f g x = f x (g x)
+K x y   = x
+I x     = x
+B f g x = f (g x)
+C f x y = f y x
+
+U f p   = (f (exl p)) (exr p)
+
+
+what if we add a combinator "seq"?
+seq x f = f x,
+but (seq x) is only a value if x is a value.
+so then ((+ x) y) becomes
+seq x ((C +) y)
+
+this is like case.
+case x { handlers ... }
+
+maybe the args stack can contain case handlers.
+
+maybe there's just a type for "strict lambda"
+
+
+
+|#
 
 (define prim? (or/c 'S 'K 'I 'B 'C 'P 'U '+))
 (define keyword? (or/c 'fn))
@@ -66,7 +93,7 @@
 ; give each term a meaning in Racket (strict semantics)
 (define/contract (eval term) (-> term? any/c)
   (match term
-    ['S (lambda (x) (lambda (y) (lambda (z) ((x z) (y z)))))]
+    ['S (lambda (f) (lambda (g) (lambda (x) ((f x) (g x)))))]
     ['K (lambda (x) (lambda (y) x))]
     ['I (lambda (x) x)]
     ['B (lambda (f) (lambda (g) (lambda (x) (f (g x)))))]
@@ -98,6 +125,7 @@
 ; if one or both arguments are constant, we can avoid plumbing an ignored
 ; value everywhere.
 (define/contract (S e1 e2) (-> combination? combination? combination?)
+  ; TODO more optimizations: http://haskell.cs.yale.edu/wp-content/uploads/2011/03/CombComp-POPL84.pdf
   (match* {e1 e2}
     [{`(K ,e1) `(K ,e2)} `(K (,e1 ,e2))]
     [{`(K ,e1) 'I} e1]
@@ -129,6 +157,8 @@
   (check-equal? (compile '(fn x ((+ x) 40))) '((C +) 40))
   (check-equal? ((eval '((C +) 40)) 2) 42)
   (check-equal? ((eval '((C P) 40)) 2) (cons 2 40))
+  ; or C is like "flip"
+  (check-equal? (eval '(((C P) 1) 2)) (cons 2 1))
 
   ; B is the compose operator: B f g x == f (g x)
   (check-equal? (compile '(fn x ((+ 2) ((+ 10) x))))
@@ -141,10 +171,133 @@
   (check-equal? (compile '(fn ((P x) y) y)) '(U (K I)))
 
 
-  ; Can I repro the "self optimization" Turner mentioned?
+
+  ; Let's look at nontermination
+  (define omega (compile '((fn x (x x)) (fn x (x x)))))
+  (check-equal? omega '(((S I) I) ((S I) I)))
+  (define delay-omega (compile `(fn x ,omega)))
+  (check-equal? delay-omega `(K ,omega))
+  ; Even though delay-omega is a lambda form, this eval will diverge.
+  ; The problem is our compilation rules assume eta-reduction is legal,
+  ; and this throws away the (fn x _) wrapper that was intended to
+  ; control side effects.
+  ;;;(check-pred procedure? (eval delay-omega))
+  ; Maybe the best thing is to use a lazy semantics.
+
+  (define Y (compile '(fn f ((fn x ((f x) x)) (fn x ((f x) x))))))
+
+
+  ; TODO implement a lazy interpreter (big step to Racket? big step rewriter? small step rewriter?)
+
+  ; TODO repro the "self optimizing" thing
+  ;  - requires a mutable term graph?
+
+  ; TODO extend pattern matching to work with other constructors
+  ;  - maybe generalize U to have a fallback case
+  ;  - also wait: what does (P x) or (S f) mean?
+  ;    - normally a curried constructor can't be taken apart
+  ;    - but now the goal is to inspect any partially applied function
+
+  ; TODO try symbolic differentiation on SKI
 
 
 
+  ;;
+  )
+
+
+
+(struct App (f a) #:transparent #:mutable)
+
+(define/contract (term->graph term) (-> term? any/c)
+  ; TODO memoize for some free sharing
+  (match term
+    [(? prim? p) p]
+    [(? number? n) n]
+    [(list f a) (App (term->graph f) (term->graph a))]))
+
+(define (update! dst f a)
+  (set-App-f! dst f)
+  (set-App-a! dst a)
+  (void))
+
+; takes a graph as input.
+; reduces it in place to a value (or (App 'I value)).
+; also returns the value (without the I wrapper).
+(define (run! graph)
+  (r! (list graph)))
+(define (r! stack)
+  (define (ret) (foldl (lambda (a f) (App f a)) (first stack) (rest stack)))
+  (match stack
+    [(list* 'S f g x stack) (r! (list* f x (App g x) stack))]
+    [(list* 'K x y stack) (r! (list* x stack))]
+    [(list* 'I x stack) (r! (list* x stack))]
+    [(list* 'B f g x stack) (r! (list* f (App g x) stack))]
+    [(list* 'C f x y stack) (r! (list* f y x stack))]
+    [(list* '+ x y stack) (match* {(run! x) (run! y)}
+                            [{(? number? x) (? number? y)} (r! (list* (+ x y) stack))]
+                            [{x y} (error '+ "non-number: ~v ~v" x y)])]
+    [(list* 'inc stack) (r! (list* '+ 1 stack))]
+    [(list* (App f a) stack) (r! (list* f a stack))]
+    ; finally, if no rewrite rule applies,
+    ; the top of the stack must be either:
+    ; - a value
+    ; - a constructor
+    ; - something you're not allowed to apply, being applied
+    [(list (? number? n)) n]
+    [(list 'P x y) (ret)]
+    [(list* (and f (or 'S 'K 'I 'B 'C '+)) args) (ret)]
+    [_ (error 'r! "no rule for stack: ~v" stack)]))
+(module+ test
+
+
+  (check-equal? (run! (App 'inc 0))
+                1)
+
+  (check-equal? (run! (App 'inc (App 'inc 0)))
+                2)
+
+  (check-equal? (run! (App 'inc (App 'inc (App 'inc (App 'inc (App 'inc (App 'inc 0)))))))
+                6)
+
+
+  (check-equal? (run! (App (App '+ 1) 2))
+                3)
+
+  (check-exn exn:fail?
+             (lambda () (run! (App 1 2))))
+
+  (check-equal? (run! (App (App '+ (App (App '+ 1) 2)) 3))
+                6)
+
+  (check-equal? (run! (App (App '+ 1) (App (App '+ 2) 3)))
+                6)
+
+  ; computed functions:
+  ; - I rule
+  (check-equal? (run! (App (App (App 'I '+) 1) 2))
+                3)
+  ; - K rule
+  (check-equal? (run! (App (App (App (App 'K '+) 7) 1) 2))
+                3)
+  ; - S rule: S + inc 3 => + 3 (inc 3) => + 3 4 => 7
+  (check-equal? (run! (App (App (App 'S '+) 'inc) 3))
+                7)
+
+
+  (check-equal? (run! (App (App (App 'C 'P) 1) 2))
+                (App (App 'P 2) 1))
+  (check-exn exn:fail?
+             (lambda () (run! (App (App (App (App 'C 'P) 1) 2) 3))))
+
+  ; partially applied combinator is a value
+  (check-equal? (run! (App (App 'S 1) 2))
+                (App (App 'S 1) 2))
+
+  ; constructors are lazy
+  (check-equal? (run! (App (App (App 'C 'P) (App 'I 'K)) (App 'I (App 'I (App 'I 'K)))))
+                (App (App 'P (App 'I (App 'I (App 'I 'K))))
+                     (App 'I 'K)))
 
   ;;
   )
