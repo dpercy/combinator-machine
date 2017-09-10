@@ -386,21 +386,19 @@ maybe there's just a type for "strict lambda"
       (run! (term->graph term))
       (nsteps)))
 
-  (define I '(((((((I I) I) I) I) I) I) I))
-  (check-equal? (count I)
-                15)
-
-  ; TODO case where a subterm gets duplicated, then forced twice.
-  ;  it should memoize the forcing.
-
-  (define twice '((S B) I))
-  (check-equal? (count `((,twice I) 0))
-                12)
-
-  ; if I is evaluated once,  this should cost about 12 + 15
-  ; if I is evaluated twice, this should cost about 12 + 15 + 15
-  (check-equal? (count `((,twice ,I) 0))
-                27)
+  ; example expensive term
+  (define expensive
+    (foldl (lambda (n e)
+             `((+ ,e) ,n))
+           0
+           (build-list 10 add1)))
+  (define expensive-cost (count expensive))
+  ; reducing (let x = E in (+ (+ x x) (+ x x)) should eval x once,
+  ; so it should cost more than cost(E) but less than 2*cost(E).
+  (define repeat (compile '(fn x ((+ ((+ x) x)) ((+ x) x)))))
+  (let ([repeat-cost (count `(,repeat ,expensive))])
+    (check > expensive-cost repeat-cost)
+    (check < (* 2 expensive-cost) repeat-cost))
 
   ;;
   )
