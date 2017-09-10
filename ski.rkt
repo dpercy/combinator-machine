@@ -419,5 +419,28 @@ maybe there's just a type for "strict lambda"
     (check > expensive-cost repeat-cost)
     (check < (* 2 expensive-cost) repeat-cost))
 
+
+  #|
+
+
+  TODO (no order):
+  - C implementation
+  .  - parse a restricted sublanguage with no binders - only globals + combinators
+  .  - graph reducer
+  .  - slab allocator
+  .  - GC
+  - better front-end
+  .  - nicer syntax - could use Racket read
+  .  - general pattern matching: case dispatch, any constructor.
+  - bootstrap(??)
+  .  - implement the front-end compiler in sasl
+  .  - store a "bytecode" version of the compiler
+  .  - OR: maybe it's easier to do this in C?
+
+
+
+  |#
+
+
   ;;
   )
