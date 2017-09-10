@@ -224,6 +224,7 @@ maybe there's just a type for "strict lambda"
     [(list f a) (App (term->graph f) (term->graph a))]))
 
 (define (update! dst f a)
+  ;;(displayln (format "    ~v  =>  ~v ~v" dst f a))
   (set-App-f! dst f)
   (set-App-a! dst a)
   (void))
@@ -244,83 +245,101 @@ maybe there's just a type for "strict lambda"
     (error 'run! "stack mismatch: old: ~v; new ~v" old-stack new-stack))
   result)
 (define stack (list))
+(define (pretty-stack)
+  (cons (first stack)
+        (for/list ([v (rest stack)])
+          (match v
+            [(App _ a) (App '_ a)]
+            [v v]))))
 (define (clear!) (set! stack '()))
 (define nsteps (make-parameter 0))
 (define/contract (r! nargs) (-> exact-nonnegative-integer? void?)
-  (define (push! . vs)
-    (set! stack (append vs stack))
-    (set! nargs (+ nargs (length vs))))
-  (define (pop!)
-    (unless (>= nargs 0)
-      (error 'r! "stack underflow"))
-    (define v (first stack))
-    (set! stack (rest stack))
-    (set! nargs (- nargs 1))
-    v)
 
   (define (ret)
+    ;;(displayln (list* 'ret nargs (pretty-stack)))
     (if (> nargs 0)
-        (let* ([f (pop!)]
-               [a (pop!)])
-          (push! (App f a))
+        (begin
+          (set! stack (cdr stack))
+          (set! nargs (- nargs 1))
           (ret))
-        (void)))
+        (begin
+          ;;(displayln (list 'ret (car stack)))
+          (void))))
 
   (nsteps (+ 1 (nsteps)))
 
-  ;;(displayln (list* 'r! nargs stack))
+  ;;(displayln (list* 'r! nargs (pretty-stack)))
   (match* {(first stack) nargs}
     ; any application at all - recur into it
     [{(App f a) _} (begin
-                     (pop!)
-                     (push! f a)
-                     (r! nargs))]
+                     (set! stack (cons f stack))
+                     (r! (+ nargs 1)))]
 
     ; rewrite rules
-    [{'S (? (>=/c 3))} (let* ([ignore (pop!)]
-                              [f (pop!)]
-                              [g (pop!)]
-                              [x (pop!)])
-                         (push! f x (App g x))
-                         (r! nargs))]
-    [{'K (? (>=/c 2))} (let* ([ignore (pop!)]
-                              [x (pop!)]
-                              [y (pop!)])
-                         (push! x)
-                         (r! nargs))]
-    [{'I (? (>=/c 1))} (let* ([ignore (pop!)]
-                              [x (pop!)])
-                         (push! x)
-                         (r! nargs))]
-    [{'B (? (>=/c 3))} (let* ([ignore (pop!)]
-                              [f (pop!)]
-                              [g (pop!)]
-                              [x (pop!)])
-                         (push! f (App g x))
-                         (r! nargs))]
-    [{'C (? (>=/c 3))} (let* ([ignore (pop!)]
-                              [f (pop!)]
-                              [x (pop!)]
-                              [y (pop!)])
-                         (push! f y x)
-                         (r! nargs))]
-    [{'+ (? (>=/c 2))} (let ()
-                         (pop!) ; drop '+
-                         (r! 0) ; eval x
-                         (define x (match (pop!)
-                                     [(? number? n) n]
-                                     [v (error '+ "non-number: ~v" v)]))
-                         ; NOTE: x needs to be a GC root, or unboxed.
-                         (r! 0) ; eval y
-                         (define y (match (pop!)
-                                     [(? number? n) n]
-                                     [v (error '+ "non-number: ~v" v)]))
-                         (push! (+ x y))
-                         (r! nargs))]
-    [{'inc _} (begin
-                (pop!)
-                (push! '+ 1)
-                (r! nargs))]
+    [{'S (? (>=/c 3))}
+     (match stack
+       [(list* 'S (App _ f) (App _ g) (and top (App _ x)) rest)
+        (update! top (App f x) (App g x))
+        (set! stack (cons top rest))
+        (r! (- nargs 3))])]
+    [{'K (? (>=/c 2))}
+     (match stack
+       [(list* 'K (App _ x) (and top (App _ y)) rest)
+        (update! top 'I x)
+        ; you don't want (update! top (App-f x) (App-a x)),
+        ; because that would copy x, and cause x to be evaluted
+        ; more than once.
+        (set! stack (cons top rest))
+        (r! (- nargs 2))])]
+    [{'I (? (>=/c 1))}
+     (match stack
+       [(list* 'I (and top (App _ x)) rest)
+        ; TODO how do you actually get rid of these indirections?
+        (set! stack (cons x rest))
+        (r! (- nargs 1))])]
+    [{'B (? (>=/c 3))}
+     (match stack
+       [(list* 'B (App _ f) (App _ g) (and top (App _ x)) rest)
+        (update! top f (App g x))
+        (set! stack (cons top rest))
+        (r! (- nargs 3))])]
+    [{'C (? (>=/c 3))}
+     (match stack
+       [(list* 'C (App _ f) (App _ x) (and top (App _ y)) rest)
+        (update! top (App f y) x)
+        (set! stack (cons top rest))
+        (r! (- nargs 3))])]
+    [{'+ (? (>=/c 2))}
+
+     (match stack
+       [(list* '+ (App _ x) (and top (App _ y)) rest)
+
+        ; force x
+        (set! stack (cons x stack))
+        (r! 0)
+        (define x* (car stack))
+        (set! stack (cdr stack))
+
+        ; force y
+        (set! stack (cons y stack))
+        (r! 0)
+        (define y* (car stack))
+        (set! stack (cdr stack))
+
+        ; Now x and y are evaluated!
+        (unless (number? x*)
+          (error '+ "left is non-number: ~v" x*))
+        (unless (number? y*)
+          (error '+ "right is non-number: ~v" y*))
+
+        (define sum (+ x* y*))
+        (update! top 'I sum)
+        (set! stack (cons top rest))
+        (r! (- nargs 2))])]
+    [{'inc _} (match stack
+                [(list* 'inc rest)
+                 (set! stack (cons (App '+ 1) rest))
+                 (r! nargs)])]
     ; not enough args -> it's a value
     [{(or 'S 'K 'I 'B 'C '+) _} (ret)]
 
