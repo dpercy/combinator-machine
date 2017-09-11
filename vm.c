@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <assert.h>
 #include <stdio.h>
+#include <unistd.h>
 
 
 #define array_end(arr) (arr + (sizeof(arr)/sizeof(arr[0])))
@@ -216,6 +217,7 @@ void print_factor(FILE* out, Word w) {
     } else if (is_word_app(w)) {
 	fprintf(out, "(");
 	print_expr(out, w);
+	fprintf(out, ")");
     } else {
 	assert(0 && "bad word type");
     }
@@ -239,6 +241,15 @@ void print_expr(FILE* out, Word w) {
 Word stack_buf[1024];
 Word* stack = array_end(stack_buf);
 
+void dump_stack(FILE* out, int nargs) {
+    fprintf(out, "%d", nargs);
+    for (Word* p=stack; p<array_end(stack_buf); ++p) {
+	fprintf(out, "\t");
+	print_factor(out, *p);
+    }
+    fprintf(out, "\n");
+}
+
 void push(Word w) {
     // TODO these assertions are different: they depend on the input program
     assert(stack > stack_buf && "stack_buf overflow");
@@ -252,12 +263,136 @@ Word pop() {
     stack++;
     return w;
 }
+Word pop_arg() {
+    Word w = pop();
+    return as_app(w)->arg;
+}
+void update(Word app, Word f, Word a) {
+    as_app(app)->fun = f;
+    as_app(app)->arg = a;
+}
+
+// Core interpreter loop:
+//  - inspects the top element of the stack
+//  - if it's an application, pushes into it
+//  - if it's a constant with enough args, apply a reduction rule
+//  - if it's a curried thing or prim value, pop until nargs==0
+// TODO introduce something for erroneous programs (as opposed to VM bugs)
+//    - what's the semantics of an error? (probably the Haskell thing)
+//    - how to express this to the caller of run?
+void r(int nargs) {
+
+    for (;;) {
+	//dump_stack(stderr, nargs);
+	
+	if (is_word_app(stack[0])) {
+	    push(as_app(stack[0])->fun);
+	    nargs += 1;
+	    continue;
+	} else if (eq(stack[0], S) && nargs >= 3) {
+	    pop();
+	    Word f = pop_arg();
+	    Word g = pop_arg();
+	    Word x = as_app(stack[0])->arg;
+	    update(stack[0], make_app(f, x), make_app(g, x));
+	    nargs -= 3;
+	    continue;
+	} else if (eq(stack[0], K) && nargs >= 2) {
+	    pop();
+	    Word x = pop_arg();
+	    Word y = as_app(stack[0])->arg;
+	    update(stack[0], I, x);
+	    nargs -= 2;
+	    continue;
+	} else if (eq(stack[0], I) && nargs >= 1) {
+	    pop();
+	    Word x = pop_arg();
+	    push(x);
+	    nargs -= 1;
+	    continue;
+	} else if (eq(stack[0], B) && nargs >= 3) {
+	    pop();
+	    Word f = pop_arg();
+	    Word g = pop_arg();
+	    Word x = as_app(stack[0])->arg;
+	    update(stack[0], f, make_app(g, x));
+	    nargs -= 3;
+	    continue;
+	} else if (eq(stack[0], C) && nargs >= 3) {
+	    pop();
+	    Word f = pop_arg();
+	    Word x = pop_arg();
+	    Word y = as_app(stack[0])->arg;
+	    update(stack[0], make_app(f, y), x);
+	    nargs -= 3;
+	    continue;
+	} else if (eq(stack[0], add) && nargs >= 2) {
+	    Word x = as_app(stack[1])->arg;
+	    Word y = as_app(stack[2])->arg;
+
+	    // eval x, and leave it on the stack to root it.
+	    push(x);
+	    r(0);
+
+	    // eval y
+	    push(y);
+	    r(0);
+	    
+	    y = pop();
+	    x = pop();
+
+	    assert(is_word_int(x));
+	    assert(is_word_int(y));
+	    Word sum = make_int(as_int(x) + as_int(y));
+
+	    // now the stack still has add, (add x), ((add x) y) on it.
+	    pop();
+	    pop();
+	    update(stack[0], I, sum);
+
+	    nargs -= 2;
+	    continue;
+	} else if (0) {
+	    // TODO cases for U and P
+	} else if (is_word_const(stack[0])) {
+	    // any constant we haven't handled must be partially-applied
+	    while (nargs --> 0)
+		pop();
+	    return;
+	} else if (is_word_int(stack[0]) && nargs == 0) {
+	    while (nargs --> 0)
+		pop();
+	    return;
+	} else if (is_word_int(stack[0]) && nargs > 0) {
+	    assert(0 && "number is not a function");
+	}
+
+	assert(0 && "no case in main loop");
+	return;
+    }
+    assert(0 && "fell out of main loop");
+    return;
+}
+
+// Takes a term graph as input.
+// Reduces it in place to a value (or to make_app(I, value)).
+// Also, returns the value (without the I wrapper).
+Word run(Word w) {
+    push(w);
+    r(0);
+    return pop();
+}
+
 
 
 
 int main() {
 
     Word w = parse_expr(stdin);
+    //print_expr(stdout, w);
+    //printf("\n");
+
+    w = run(w);
     print_expr(stdout, w);
     printf("\n");
   
