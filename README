@@ -44,3 +44,80 @@ TODO:
 - test examples of higher-order functions like foldr and thrice:
     - do they simplify to the hand-written version?
     - can evaluation be *too* eager? (diverge at compile time)
+
+
+
+
+
+
+    
+CONSTRUCTORS:
+- you can't inspect a partially-applied constructor
+
+building block:  tryunpack v tag handler default
+
+tryunpack v P (\x y. E) fail
+
+
+map f [] = []
+map f (x:xs) = x:(map f xs)
+
+map f lst = case lst of
+| [] -> []
+| x:xs -> x:(map f xs)
+
+map = \f lst.
+tryunpack lst Empty Empty $
+tryunpack lst Pair \x xs. x:(map f xs)
+
+problems:
+- type is crazy: number of args depends on a value
+- rewrite rules could be simpler
+
+
+caser tag handler default value
+
+map f =
+(caser Empty Empty)
+(caser Pair \x xs. x:(map f xs))
+
+map f lst =
+(
+(caser Empty Empty)
+(caser Pair \x xs. x:(map f xs))
+) lst
+
+caser Empty :: a            -> (MaybeEmpty -> a) -> MaybeEmpty -> a
+caser Pair :: (x -> y -> a) -> (MaybePairXY -> a) -> MaybePairXY -> a
+
+caser Empty t f Empty       => t
+caser Empty t f (Pair x y)  => f (Pair x y)
+
+caser Pair t f (Pair x y) => t x y
+caser Pair t f Empty      => f Empty
+
+in general:
+caser C  t f (C args ...) => t args ...
+caser C' t f (C args ...) => f (C args ...)
+
+caser C :: (fields ... -> out) -> (in -> out) -> in -> out
+.          t                      f
+
+https://www.classes.cs.uchicago.edu/archive/2011/spring/22620-1/papers/pettersson92.pdf
+
+
+So TODO for constructors:
+- caser to decompose things (TODO better name)
+- way to define a new constructor
+  - "new" ? as in gensym? not referentially transparent?
+- maybe a constructor should be a value?
+- the name is not enough: you also need the arity.
+
+
+so it sounds like I need:
+- (constructor name arity)
+  - name is important for the value because not all 2-ctors (3-ctors, etc) are equal.
+- strings
+- 
+
+

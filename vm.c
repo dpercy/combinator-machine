@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <string.h>
 
 
 #define array_end(arr) (arr + (sizeof(arr)/sizeof(arr[0])))
@@ -86,9 +87,9 @@ const Word K = { .pointer = &consts[1] };
 const Word I = { .pointer = &consts[2] };
 const Word B = { .pointer = &consts[3] };
 const Word C = { .pointer = &consts[4] };
-const Word U = { .pointer = &consts[5] };
-const Word P = { .pointer = &consts[6] };
-const Word add = { .pointer = &consts[7] };
+const Word constructor = { .pointer = &consts[5] };
+const Word caser = { .pointer = &consts[6] };
+const Word add = { .pointer = &consts[7] }; // TODO more generic foreign functions?
 
 const char* const_name(Word w) {
     assert(is_word_const(w));
@@ -97,8 +98,6 @@ const char* const_name(Word w) {
     if (eq(w, I)) return "I";
     if (eq(w, B)) return "B";
     if (eq(w, C)) return "C";
-    if (eq(w, U)) return "U";
-    if (eq(w, P)) return "P";
     if (eq(w, add)) return "add";
     return "#<unknown>";
 }
@@ -150,26 +149,26 @@ Word parse_integer(FILE* in) {
     }
     return make_int(n);
 }
+void fgetword(FILE* in, char* buf, char* end) {
+    while ((end - buf) > 1 && isalpha(peek(in)))
+	*buf++ = fgetc(in);
+    *buf++ = '\0';
+    assert(buf <= end);
+}
 Word parse_symbol(FILE* in) {
-    int c = fgetc(in);
-    switch (c) {
-    case 'S': return S;
-    case 'K': return K;
-    case 'I': return I;
-    case 'B': return B;
-    case 'C': return C;
-    case 'U': return U;
-    case 'P': return P;
-    case 'a':
-	c = fgetc(in);
-	assert(c == 'd');
-	c = fgetc(in);
-	assert(c == 'd');
-	return add;
-    default:
-	assert(0 && "unrecognized symbol");
-	return make_int(666);
-    }
+    static char buf[1024];
+    fgetword(in, buf, array_end(buf));
+    
+    if (0 == strcmp(buf, "S")) return S;
+    if (0 == strcmp(buf, "S")) return S;
+    if (0 == strcmp(buf, "K")) return K;
+    if (0 == strcmp(buf, "I")) return I;
+    if (0 == strcmp(buf, "B")) return B;
+    if (0 == strcmp(buf, "C")) return C;
+    if (0 == strcmp(buf, "add")) return add;
+    
+    assert(0 && "unrecognized symbol");
+    return make_int(666);
 }
 
 

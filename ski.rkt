@@ -222,6 +222,12 @@ maybe there's just a type for "strict lambda"
     [(? prim? p) p]
     [(? number? n) n]
     [(list f a) (App (term->graph f) (term->graph a))]))
+(define/contract (graph->term g) (-> any/c term?)
+  (match g
+    [(App f a) (list (graph->term f) (graph->term a))]
+    [v v]))
+(define (run v)
+  (graph->term (run! (term->graph v))))
 
 (define (update! dst f a)
   ;;(displayln (format "    ~v  =>  ~v ~v" dst f a))
@@ -436,8 +442,6 @@ maybe there's just a type for "strict lambda"
   .  - implement the front-end compiler in sasl
   .  - store a "bytecode" version of the compiler
   .  - OR: maybe it's easier to do this in C?
-
-
 
   |#
 
